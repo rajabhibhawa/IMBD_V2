@@ -1,7 +1,8 @@
 import numpy as np
 import streamlit as st
+import pickle
+import re
 
-from tensorflow.keras.datasets import imdb
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.models import load_model
 
@@ -18,12 +19,14 @@ st.set_page_config(
 st.title("🎬 IMDB Movie Review Sentiment (v2)")
 st.caption("Klasifikasi sentimen review film menggunakan model GRU")
 
+MAX_LEN = 250  # sesuai MAX_LEN_B waktu training
+
 
 # =========================================================
 # PILIH MODEL  --> [FITUR BARU v2] bisa pilih antar model
 # =========================================================
 model_paths = {
-    "GRU - Model 1": "best_model_imdb_GRU_Config2_seqB.h5",
+    "GRU - Model 1": "best_model_imdb_GRU_Config2_SeqB.h5",
     "GRU - Model 2": "GRU_Config1_SeqB.h5"
 }
 
@@ -45,35 +48,36 @@ except Exception as error:
 
 
 # =========================================================
-# LOAD WORD INDEX (BAWAAN DATASET IMDB KERAS)
+# LOAD TOKENIZER (SAMA PERSIS DENGAN YANG DIPAKAI TRAINING)
 # =========================================================
 @st.cache_resource
-def get_word_index():
-    word_index = imdb.get_word_index()
-    word_index = {k: (v + 3) for k, v in word_index.items()}
-    word_index["<PAD>"] = 0
-    word_index["<START>"] = 1
-    word_index["<UNK>"] = 2
-    return word_index
+def load_tokenizer(path="tokenizer.pickle"):
+    with open(path, "rb") as f:
+        return pickle.load(f)
 
-word_index = get_word_index()
-
-MAX_LEN = model.input_shape[1]
+try:
+    tokenizer = load_tokenizer()
+except Exception as error:
+    st.error(f"Gagal memuat tokenizer: {error}")
+    st.stop()
 
 
 # =========================================================
-# FUNGSI KONVERSI TEKS -> SEQUENCE ANGKA
+# TEXT CLEANING (SAMA PERSIS DENGAN NOTEBOOK TRAINING)
 # =========================================================
+def clean_text(text):
+    text = text.lower()
+    text = re.sub(r'<br\s*/?>', ' ', text)          # hapus tag HTML
+    text = re.sub(r'[^a-zA-Z\s]', '', text)          # hapus angka & simbol
+    text = re.sub(r'\s+', ' ', text).strip()          # hapus spasi berlebih
+    return text
+
+
 def encode_review(text):
-    words = text.lower().split()
-    encoded = [1]
-    for word in words:
-        idx = word_index.get(word, 2)
-        if idx < 10000:
-            encoded.append(idx)
-        else:
-            encoded.append(2)
-    return encoded
+    cleaned = clean_text(text)
+    seq = tokenizer.texts_to_sequences([cleaned])
+    padded = pad_sequences(seq, maxlen=MAX_LEN, padding='post', truncating='post')
+    return padded
 
 
 # =========================================================
@@ -82,7 +86,7 @@ def encode_review(text):
 st.subheader("📝 Masukkan Review Film")
 
 user_review = st.text_area(
-    "Tulis review film (dalam Bahasa Inggris, sesuai dataset IMDB)",
+    "Tulis review film (dalam Bahasa Inggris)",
     height=150,
     placeholder="Contoh: This movie was absolutely fantastic, great acting and story..."
 )
@@ -92,8 +96,7 @@ if st.button("Analisis Sentimen", type="primary", use_container_width=True):
         st.warning("Silakan masukkan review terlebih dahulu.")
     else:
         try:
-            encoded_review = encode_review(user_review)
-            padded_review = pad_sequences([encoded_review], maxlen=MAX_LEN)
+            padded_review = encode_review(user_review)
 
             prediction = model.predict(padded_review, verbose=0)
             score = float(prediction[0][0])
